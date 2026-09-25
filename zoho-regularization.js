@@ -1,8 +1,7 @@
-(function () {
+(async function () {
   var checkInTime = '09:00 AM';
   var checkOutTime = '06:00 PM';
-  var reasonVal = '1';
-  var reasonText = 'Forgot to check-out';
+  var reasonText = 'Worked from home';
   var descText = 'work from home';
 
   function fillMaskedInput(inputEl, fullText) {
@@ -38,48 +37,87 @@
     }
 
     inputEl.dispatchEvent(new Event('change', { bubbles: true }));
-    inputEl.blur();
+    inputEl.dispatchEvent(new FocusEvent('blur', { bubbles: true }));
   }
 
-  // Simulates a genuine user "click-in" and "click-out"
-  function simulateUserClickInOut(element) {
-    if (!element) return;
-    element.focus();
-    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    element.dispatchEvent(new Event('input', { bubbles: true }));
-    element.dispatchEvent(new Event('change', { bubbles: true }));
-    element.blur();
-    element.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  async function selectZohoReason(index, label) {
+    var container = document.getElementById('reg_req_reason_' + index + '-container');
+    var listbox = document.getElementById('reg_req_reason_' + index + '-listbox');
+    if (!container || !listbox) return;
+
+    var trigger = container.querySelector('.zselectbox__arrow, .zselectbox__trigger, span') || container;
+    trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    trigger.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    await new Promise(function (resolve) { setTimeout(resolve, 60); });
+
+    var items = Array.from(listbox.querySelectorAll('li, div[role="option"], div, span'));
+    var match = items.find(function (el) {
+      return el.children.length === 0 && el.innerText.trim().toLowerCase() === label.toLowerCase();
+    });
+
+    if (match) {
+      match.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      match.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+      match.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+
+    container.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    container.blur();
+  }
+
+  function triggerZohoCalculation(row, hiddenIn, hiddenOut) {
+    if (window.regularization_operation && window.$) {
+      try {
+        var $row = $(row);
+        var $in = $(hiddenIn);
+        var $out = $(hiddenOut);
+
+        if (typeof regularization_operation.regFILOChangedTabular === 'function') {
+          regularization_operation.regFILOChangedTabular($in);
+          regularization_operation.regFILOChangedTabular($out);
+        }
+        if (typeof regularization_operation.calculateDuration === 'function') {
+          regularization_operation.calculateDuration($row);
+        }
+        if (typeof regularization_operation.calculateTotalHours === 'function') {
+          regularization_operation.calculateTotalHours();
+        }
+      } catch (e) {
+        console.warn('Direct calculation call error:', e);
+      }
+    }
   }
 
   var rows = document.querySelectorAll('#attRegTableBody tr:not(#attDetailsListRow):not(.DNI)');
 
-  rows.forEach(function (row, index) {
+  for (var index = 0; index < rows.length; index++) {
+    var row = rows[index];
+
     // 1. Skip weekends
     var dayEl = row.querySelector('#dayValue');
     var day = dayEl ? dayEl.innerText.trim().toLowerCase() : '';
     if (day === 'sat' || day === 'sun') {
-      return;
+      continue;
     }
 
-    // 2. Date
+    // 2. Extract date
     var dateCell = row.querySelector('#attRegDateDiv');
     var dateStr = dateCell ? dateCell.getAttribute('date_orgformat') : row.id;
-    if (!dateStr) return;
+    if (!dateStr) continue;
 
     var fullIn = dateStr + ' ' + checkInTime;
     var fullOut = dateStr + ' ' + checkOutTime;
 
-    // 3. Fill textboxes
+    // 3. Fill textboxes (paste/insertText)
     var checkInBox = row.querySelector('#check-in-' + index + '-container input.zinputfield__textbox');
     var checkOutBox = row.querySelector('#check-out-' + index + '-container input.zinputfield__textbox');
 
     fillMaskedInput(checkInBox, fullIn);
     fillMaskedInput(checkOutBox, fullOut);
 
-    // Sync hidden base inputs
+    // 4. Update hidden inputs and fire change
     var hiddenIn = document.getElementById('check-in-' + index);
     if (hiddenIn) {
       hiddenIn.value = fullIn;
@@ -91,33 +129,8 @@
       hiddenOut.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    // 4. Trigger click-in and click-out cycle to trigger hours calculation
-    simulateUserClickInOut(checkInBox);
-    simulateUserClickInOut(checkOutBox);
-
-    // Direct invocation of Zoho's row calculation methods
-    if (window.regularization_operation && window.$) {
-      try {
-        if (typeof regularization_operation.regFILOChangedTabular === 'function' && hiddenOut) {
-          regularization_operation.regFILOChangedTabular($(hiddenOut));
-        }
-        if (typeof regularization_operation.calculateDuration === 'function') {
-          regularization_operation.calculateDuration($(row));
-        }
-      } catch (e) {}
-    }
-
-    // 5. Fill Reason
-    var sel = document.getElementById('reg_req_reason_' + index);
-    if (sel) {
-      sel.value = reasonVal;
-      sel.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-    var selBox = document.getElementById('reg_req_reason_' + index + '-container');
-    if (selBox) {
-      var txt = selBox.querySelector('.zselectbox__text');
-      if (txt) txt.textContent = reasonText;
-    }
+    // 5. Select Reason
+    await selectZohoReason(index, reasonText);
 
     // 6. Fill Description
     var desc = row.querySelector('input#reg_req_desc');
@@ -129,7 +142,17 @@
         regularization_operation.checkSingleRowCharacterLimit($(desc));
       }
     }
-  });
 
-  console.log('✅ Form automated with total hours calculated.');
+    // 7. Trigger row and grand total duration calculations
+    triggerZohoCalculation(row, hiddenIn, hiddenOut);
+  }
+
+  // Final pass for grand totals across the entire table
+  if (window.regularization_operation && typeof regularization_operation.calculateTotalHours === 'function') {
+    try {
+      regularization_operation.calculateTotalHours();
+    } catch (e) {}
+  }
+
+  console.log('✅ Form automated: dates, calculated hours, and reasons intact.');
 })();
